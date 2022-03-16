@@ -1,0 +1,104 @@
+#Author: Nathan ward
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Example API Gateway configuration with a key.
+
+Globals:
+  Function:
+    #Documentation and other DeploymentPreference Types can be found here: https://github.com/awslabs/serverless-application-model/blob/master/docs/safe_lambda_deployments.rst
+    AutoPublishAlias: live
+    DeploymentPreference:
+      Type: AllAtOnce
+  Api:
+    BinaryMediaTypes:
+      #The ~1 will be replaced with / when deployed
+      - '*~1*'
+
+Parameters:
+  AttachLambdaFunctionToVPC: { Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  Stage: {Type: String, Default: 'prod'}
+  ServiceName: {Type: String, Default: 'ExampleAPIGatewayKey'}
+
+Conditions:
+  RunLambdaInVPC:
+    Fn::Equals: [ {Ref: AttachLambdaFunctionToVPC}, "true"]
+  IsProd:
+    Fn::Equals:
+      - Ref: Stage
+      - prod
+
+Resources:
+  #API gateway.
+  ExampleApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Auth:
+        ApiKeyRequired: true
+      Description: Example API with a key auth.
+      EndpointConfiguration:
+        Type: REGIONAL
+      StageName: {Ref: Stage}
+
+  #Auth key used to send a request.
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    #https://github.com/aws/serverless-application-model/issues/192
+    #Needs a (hidden) object to reference stage.
+    DependsOn:
+      - ExampleApiStage
+    Properties:
+      Description: API key used for this example.
+      Enabled: true
+      Name: ExampleKey
+      StageKeys: 
+        - RestApiId: {Ref: ExampleApi}
+          StageName: {Ref: Stage}
+
+  #Usage plan for API. Required to use the key.
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    #https://github.com/aws/serverless-application-model/issues/192
+    #Needs a (hidden) object to reference stage.
+    DependsOn:
+      - ExampleApiStage
+    Properties:
+      ApiStages: 
+        - ApiId: {Ref: ExampleApi}
+          Stage: {Ref: Stage}
+      Description: !Join [" ", [{"Ref": "AWS::StackName"}, "usage plan"]]
+      UsagePlanName: !Join ["", [{"Ref": "AWS::StackName"}, "-usage-plan"]]
+
+  #Key attached to usage plan.
+  ApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: {Ref: ApiKey}
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+  #Exmample hello world that confirms your auth was successful.
+  ApiGatewayLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Hello world lambda that confirms auth was successful.
+      MemorySize: 128
+      Handler: lambda_functions.lambda_handler
+      Runtime: python3.9
+      CodeUri: src/
+      Timeout: 3
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /
+            Method: get
+            RestApiId: {Ref: ExampleApi}
+
+Outputs:
+  StackArn:
+    Description: "Use this as the stack_arn in your cloud_formation_deployment_stack override."
+    Value: {Ref: 'AWS::StackId'}
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage."
+    Value: {'Fn::Sub': 'https://${ExampleApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'}

@@ -1,0 +1,4 @@
+#If sam build fails due to outdated deps, use pip install -r requirements.txt --upgrade
+#then delete .aws-sam folder and retry.
+#Requirements file for lambda functions.
+boto3
